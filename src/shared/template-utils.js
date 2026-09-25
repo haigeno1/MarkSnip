@@ -70,6 +70,46 @@
     return name;
   }
 
+  // eslint-disable-next-line no-control-regex
+  const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]+/g;
+  const RESERVED_WINDOWS_NAME_RE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+
+  function sanitizeDownloadPathSegment(segment) {
+    let cleaned = String(segment)
+      .replace(CONTROL_CHARS_RE, ' ')
+      .replace(/^[\s.]+/, '')
+      .replace(/[\s.]+$/, '');
+    if (RESERVED_WINDOWS_NAME_RE.test(cleaned)) {
+      cleaned = '_' + cleaned;
+    }
+    return cleaned;
+  }
+
+  /**
+   * Makes a relative download path acceptable to the browser downloads API.
+   * Chrome rejects the whole download ("Invalid filename") when any path segment
+   * is empty, starts with a dot, ends with a dot or space, contains control
+   * characters, or is a reserved Windows device name. Paths that are already
+   * valid are returned unchanged.
+   */
+  function sanitizeDownloadPath(path) {
+    if (typeof path !== 'string' || !path) return path;
+
+    const segments = path.split('/');
+    const lastIndex = segments.length - 1;
+    const cleanedSegments = segments.map((segment, index) => {
+      // A final segment that is only an extension (e.g. ".md" from an empty title)
+      if (index === lastIndex && /^[\s.]*\.[A-Za-z0-9]+$/.test(segment)) {
+        return 'Untitled' + segment.slice(segment.lastIndexOf('.'));
+      }
+      return sanitizeDownloadPathSegment(segment);
+    });
+
+    const finalSegment = cleanedSegments[lastIndex] || 'Untitled';
+    const folders = cleanedSegments.slice(0, lastIndex).filter(Boolean);
+    return [...folders, finalSegment].join('/');
+  }
+
   const FILTERS = {
     kebab:     (s) => s.replace(/ /g, '-').toLowerCase(),
     snake:     (s) => s.replace(/ /g, '_').toLowerCase(),
@@ -136,10 +176,13 @@
     return String(str == null ? '' : str).replace(promptPlaceholderRegex(), '');
   }
 
-  function textReplace(string, article, disallowedChars = null, disallowedCharReplacement = '') {
+  // transformValue (optional) is applied to every substituted value after filters,
+  // e.g. encodeURIComponent when the template is a URL.
+  function textReplace(string, article, disallowedChars = null, disallowedCharReplacement = '', transformValue = null) {
     const protectedPrompts = protectPromptPlaceholders(string);
     string = protectedPrompts.text;
     const shouldSanitizeValues = disallowedChars !== null && disallowedChars !== undefined;
+    const finish = typeof transformValue === 'function' ? transformValue : (value) => value;
 
     const keys = Object.keys(article)
       .filter((k) => k !== 'content' && Object.prototype.hasOwnProperty.call(article, k))
@@ -153,7 +196,7 @@
         '{' + escapeRegExp(key) + '((?::(?:' + FILTER_NAMES + '))*)}',
         'g'
       );
-      string = string.replace(pattern, (_, chain) => (chain ? applyFilters(s, chain) : s));
+      string = string.replace(pattern, (_, chain) => finish(chain ? applyFilters(s, chain) : s));
     }
 
     const now = new Date();
@@ -162,7 +205,7 @@
     if (matches && matches.forEach) {
       matches.forEach((match) => {
         const format = match.substring(6, match.length - 1);
-        const dateString = formatDate(now, format);
+        const dateString = finish(formatDate(now, format));
         string = string.replaceAll(match, dateString);
       });
     }
@@ -174,7 +217,7 @@
       if (parsedPublishedTime && !isNaN(parsedPublishedTime.getTime())) {
         publishedTimeMatches.forEach((match) => {
           const format = match.substring(15, match.length - 1);
-          const dateString = formatDate(parsedPublishedTime, format);
+          const dateString = finish(formatDate(parsedPublishedTime, format));
           string = string.replaceAll(match, dateString);
         });
       }
@@ -188,7 +231,7 @@
         try {
           separator = JSON.parse(JSON.stringify(separator).replace(/\\\\/g, '\\'));
         } catch { }
-        const keywordsString = (article.keywords || []).join(separator);
+        const keywordsString = finish((article.keywords || []).join(separator));
         string = string.replace(new RegExp(match.replace(/\\/g, '\\\\'), 'g'), keywordsString);
       });
     }
@@ -202,6 +245,7 @@
   return {
     textReplace,
     generateValidFileName,
+    sanitizeDownloadPath,
     protectPromptPlaceholders,
     stripPromptPlaceholders,
     applyFilters,

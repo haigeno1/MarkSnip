@@ -100,4 +100,27 @@ describe('MathML to TeX conversion', () => {
 
     expect(mathMLApi.mathmlToTex(math)).toBe('\\mathrm{number\\_of\\_buys}_{i,t}');
   });
+
+  test.each([
+    ['<mi>α</mi><mi>x</mi>', '\\alpha x'],
+    ['<mo>±</mo><mi>x</mi>', '\\pm x'],
+    ['<mo>∑</mo><mi>i</mi>', '\\sum i'],
+    ['<mo>∂</mo><mi>f</mi>', '\\partial f'],
+    ['<mi>α</mi><mo>+</mo><mi>β</mi>', '\\alpha+\\beta']
+  ])('keeps control words separate from following letters: %s', (inner, expected) => {
+    expect(mathMLApi.mathmlToTex(parseMath('<math>' + inner + '</math>'))).toBe(expected);
+  });
+
+  test('escapes TeX special characters in tokens', () => {
+    expect(mathMLApi.mathmlToTex(parseMath('<math><mn>50</mn><mo>%</mo><mo>+</mo><mn>1</mn></math>'))).toBe('50\\%+1');
+  });
+
+  test('converts mfenced brace and empty delimiters', () => {
+    expect(mathMLApi.mathmlToTex(parseMath('<math><mfenced open="{" close="}"><mi>a</mi><mi>b</mi></mfenced></math>'))).toBe('\\left\\{a,b\\right\\}');
+    expect(mathMLApi.mathmlToTex(parseMath('<math><mfenced open="" close="|" separators=""><mi>a</mi><mi>b</mi></mfenced></math>'))).toBe('\\left.ab\\right|');
+  });
+
+  test('escapes a backslash in mtext without double-escaping its braces', () => {
+    expect(mathMLApi.mathmlToTex(parseMath('<math><mtext>a\\b</mtext></math>'))).toBe('\\text{a\\textbackslash{}b}');
+  });
 });

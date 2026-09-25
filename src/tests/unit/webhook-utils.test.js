@@ -307,4 +307,12 @@ describe('Webhook utilities', () => {
     expect(request.headers['X-Published']).toBe('2026-05-05');
     expect(JSON.parse(request.body)).toEqual({ published: '2026-05-05' });
   });
+
+  test('URL-encodes page values substituted into the webhook URL', () => {
+    const target = { url: 'https://api.example.com/v1/notes/{title}', method: 'POST', headers: [], bodyTemplate: '' };
+    const article = { title: '../../admin/users?x=#y', content: 'x', pageURL: 'https://example.com' };
+    const request = buildWebhookFetchRequest({ target, article });
+    expect(request.url).toBe('https://api.example.com/v1/notes/..%2F..%2Fadmin%2Fusers%3Fx%3D%23y');
+    expect(new URL(request.url).pathname.startsWith('/v1/notes/')).toBe(true);
+  });
 });

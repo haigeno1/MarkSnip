@@ -183,4 +183,53 @@ describe('Template utils helpers', () => {
       });
     });
   });
+
+  describe('sanitizeDownloadPath', () => {
+    const { sanitizeDownloadPath } = require('../../shared/template-utils');
+
+    // Each of these inputs is rejected by Chrome's downloads API with "Invalid filename".
+    test.each([
+      ['.NET 9 released.md', 'NET 9 released.md'],
+      ['/Title.md', 'Title.md'],
+      ['Jr./Hmm.md', 'Jr/Hmm.md'],
+      ['Clips /Note.md', 'Clips/Note.md'],
+      ['CON.md', '_CON.md'],
+      ['nul.md', '_nul.md'],
+      ['Tab\there.md', 'Tab here.md'],
+      ['Line\nbreak.md', 'Line break.md'],
+      ['../escape.md', 'escape.md'],
+      ['Wait.../x.png', 'Wait/x.png'],
+      ['.md', 'Untitled.md']
+    ])('makes %j acceptable to the downloads API', (input, expected) => {
+      expect(sanitizeDownloadPath(input)).toBe(expected);
+    });
+
+    test.each([
+      'Normal title.md',
+      'Clips/2026/How to write tests.md',
+      'Hmm....md',
+      'Consent form.md',
+      'com10.md'
+    ])('leaves the valid path %j unchanged', (input) => {
+      expect(sanitizeDownloadPath(input)).toBe(input);
+    });
+
+    test('is idempotent', () => {
+      const once = sanitizeDownloadPath(' ..CON./ .x. /.md');
+      expect(sanitizeDownloadPath(once)).toBe(once);
+    });
+  });
+
+  describe('textReplace value transform', () => {
+    const { textReplace } = require('../../shared/template-utils');
+
+    test('applies the transform to substituted values only, after filters', () => {
+      const result = textReplace('https://x.test/{title:kebab}/{byline}', { title: 'A B', byline: 'c/d?e' }, null, '', encodeURIComponent);
+      expect(result).toBe('https://x.test/a-b/c%2Fd%3Fe');
+    });
+
+    test('leaves values untouched without a transform', () => {
+      expect(textReplace('{byline}', { byline: 'c/d?e' })).toBe('c/d?e');
+    });
+  });
 });

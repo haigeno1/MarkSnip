@@ -305,6 +305,25 @@
     return renderedTemplate.split(sentinel).join(content);
   }
 
+  // Like renderWebhookTemplateString, but every substituted value is URL-encoded,
+  // so page data such as a title containing "../", "?" or "#" cannot change the
+  // request's path, query or fragment.
+  function renderWebhookUrlTemplate(template, article) {
+    if (typeof template !== 'string' || !template) {
+      return template;
+    }
+
+    const templateUtils = getTemplateUtils();
+    const content = String(article?.content || '');
+    const sentinel = createContentSentinel(template, content);
+    const preparedTemplate = template.replace(/\{content\}/g, sentinel);
+    const renderedTemplate = typeof templateUtils.textReplace === 'function'
+      ? templateUtils.textReplace(preparedTemplate, article || {}, null, '', encodeURIComponent)
+      : preparedTemplate;
+
+    return renderedTemplate.split(sentinel).join(encodeURIComponent(content));
+  }
+
   function renderWebhookJsonValue(value, article) {
     if (typeof value === 'string') {
       return renderWebhookTemplateString(value, article);
@@ -501,7 +520,7 @@
   }
 
   function buildWebhookFetchRequest({ target, article } = {}) {
-    const renderedUrl = renderWebhookTemplateString(String(target?.url || ''), article);
+    const renderedUrl = renderWebhookUrlTemplate(String(target?.url || ''), article);
     return {
       url: assertValidWebhookUrl(renderedUrl),
       method: String(target?.method || 'POST').trim().toUpperCase() || 'POST',
@@ -515,6 +534,7 @@
     buildWebhookArticleFromMessage,
     normalizeWebhookKeywords,
     renderWebhookTemplateString,
+    renderWebhookUrlTemplate,
     renderWebhookJsonBody,
     validateWebhookUrl,
     assertValidWebhookUrl,

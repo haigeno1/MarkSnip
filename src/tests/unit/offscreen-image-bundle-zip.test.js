@@ -80,6 +80,7 @@ function createOffscreenSandbox() {
     chrome: {},
     defaultOptions: {},
     markSnipUrlUtils: require('../../shared/url-utils'),
+    markSnipTemplateUtils: require('../../shared/template-utils'),
     URL: {
       createObjectURL: jest.fn((blob) => {
         const url = `blob:marksnip-test/${++blobIndex}`;

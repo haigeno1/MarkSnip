@@ -114,6 +114,7 @@ function createServiceWorkerSandbox() {
     markSnipTemplateUtils: {
       textReplace: (value) => value,
       generateValidFileName: (value) => value,
+      sanitizeDownloadPath: require('../../shared/template-utils').sanitizeDownloadPath,
       protectPromptPlaceholders: (value) => ({ text: value, placeholders: [] }),
       stripPromptPlaceholders: (value) => value
     },

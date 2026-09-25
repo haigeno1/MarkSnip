@@ -19,7 +19,6 @@ let agentBridgeStatus = {
     updatedAt: ''
 };
 let agentBridgeInstallCommand = 'marksnip install-host';
-let keyupTimeout = null;
 let templatePreviewListenersBound = false;
 const SPECIAL_THEME_CLASS_NAMES = ['special-theme-claude', 'special-theme-perplexity', 'special-theme-openai', 'special-theme-atla', 'special-theme-ben10', 'special-theme-colorblind'];
 const COLORBLIND_VARIANT_CLASS_NAMES = ['colorblind-theme-deuteranopia', 'colorblind-theme-protanopia', 'colorblind-theme-tritanopia'];
@@ -3317,7 +3316,7 @@ const inputChange = async (e) => {
                     ...librarySettings,
                     itemsToKeep: value
                 }).itemsToKeep;
-                // Only trim on commit (change/blur), never on debounced keyup —
+                // Only trim on commit (change/blur), never on the debounced input save —
                 // typing "50" otherwise trims through 5 before reaching 50.
                 if (e.type === 'change') {
                     document.querySelector("[name='libraryItemsToKeep']").value = librarySettings.itemsToKeep;
@@ -3404,10 +3403,46 @@ const inputChange = async (e) => {
     }
  }
 
-const inputKeyup = (e) => {
-    if (keyupTimeout) clearTimeout(keyupTimeout);
-    keyupTimeout = setTimeout(inputChange, 500, e);
+// Debounced autosave for text-like fields. Each field keeps its own timer so
+// editing a second field cannot cancel the first field's pending save.
+const pendingInputSaves = new Map();
+
+const scheduleInputSave = (e) => {
+    const field = e.target;
+    const pending = pendingInputSaves.get(field);
+    if (pending) clearTimeout(pending.timer);
+    pendingInputSaves.set(field, {
+        event: e,
+        timer: setTimeout(() => {
+            pendingInputSaves.delete(field);
+            inputChange(e);
+        }, 500)
+    });
 }
+
+// Commit immediately (on change/blur), replacing any pending debounced save.
+const commitInputChange = (e) => {
+    const pending = pendingInputSaves.get(e.target);
+    if (pending) {
+        clearTimeout(pending.timer);
+        pendingInputSaves.delete(e.target);
+    }
+    inputChange(e);
+}
+
+const flushPendingInputSaves = () => {
+    for (const [field, pending] of Array.from(pendingInputSaves.entries())) {
+        clearTimeout(pending.timer);
+        pendingInputSaves.delete(field);
+        inputChange(pending.event);
+    }
+}
+
+// Closing or hiding the page must not drop an edit still waiting on the debounce.
+window.addEventListener('pagehide', flushPendingInputSaves);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingInputSaves();
+});
 
 const buttonClick = async (e) => {
     if (e.target.id == "import" || e.target.closest('#import')) {
@@ -3768,12 +3803,10 @@ const loaded = async () => {
 		        if (['agentBridgePermContinue', 'agentBridgePermCancel', 'agentBridgePermRetry', 'agentBridgePermDismiss'].includes(input.id)) return;
 	        // Skip colorblind theme dropdown (has its own handlers)
 	        if (input.id === 'colorBlindThemeBtn' || input.closest('#colorBlindThemePanel')) return;
-        if (input.tagName == "TEXTAREA" || input.type == "text") {
-            input.addEventListener('keyup', inputKeyup);
-        }
-        else if (input.type == "number") {
-            input.addEventListener('keyup', inputKeyup);
-            input.addEventListener('change', inputChange);
+        // "input" covers typing, paste, cut and drag-and-drop; "change" commits on blur.
+        if (input.tagName == "TEXTAREA" || input.type == "text" || input.type == "number") {
+            input.addEventListener('input', scheduleInputSave);
+            input.addEventListener('change', commitInputChange);
         }
         else if (input.tagName == "BUTTON") {
             input.addEventListener('click', buttonClick);

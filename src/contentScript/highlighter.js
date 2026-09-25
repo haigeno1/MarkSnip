@@ -146,6 +146,9 @@
         cursor: pointer;
         transition: opacity 140ms cubic-bezier(0.23, 1, 0.32, 1);
       }
+      /* With the highlighter off, clicks pass through to the page (links, buttons).
+         Highlights are still hit-tested geometrically in findHighlightAtPoint. */
+      html:not(.marksnip-highlighter-active) .marksnip-highlight-overlay { pointer-events: none; }
       .marksnip-highlight-overlay[data-color="green"]  { background: rgba(168, 217, 119, 0.34); box-shadow: 0 0 0 1px rgba(30, 90, 20, 0.14) inset; }
       .marksnip-highlight-overlay[data-color="blue"]   { background: rgba(142, 200, 255, 0.34); box-shadow: 0 0 0 1px rgba(20, 70, 140, 0.14) inset; }
       .marksnip-highlight-overlay[data-color="pink"]   { background: rgba(242, 160, 189, 0.34); box-shadow: 0 0 0 1px rgba(140, 30, 70, 0.14) inset; }
@@ -1621,6 +1624,16 @@
     return !uiNode.matches?.('.marksnip-highlight-overlay[data-highlight-id]');
   }
 
+  const INTERACTIVE_PAGE_SELECTOR = [
+    'a[href]', 'area[href]', 'button', 'input', 'select', 'textarea', 'label', 'summary',
+    '[contenteditable=""]', '[contenteditable="true"]', '[role="button"]', '[role="link"]'
+  ].join(', ');
+
+  function isInteractivePageTarget(target) {
+    const element = target?.nodeType === 1 ? target : target?.parentElement;
+    return !!element?.closest?.(INTERACTIVE_PAGE_SELECTOR);
+  }
+
   function addInteractionListeners() {
     if (state.handlers.click) {
       addSurfaceInteractionListeners();
@@ -1641,6 +1654,14 @@
       if (isHighlighterUiEvent(event)) return;
 
       const hitId = findHighlightAtPoint(event.clientX, event.clientY);
+      // Saved highlights are rendered on every visit, even with the highlighter off.
+      // A highlight on a link or control must not swallow the page's own click then.
+      if (hitId && !state.active && isInteractivePageTarget(event.target)) {
+        if (state.actionPillHighlightId || document.getElementById(EDIT_PANEL_ID)) {
+          removeActionPill();
+        }
+        return;
+      }
       if (hitId) {
         event.preventDefault();
         event.stopPropagation();

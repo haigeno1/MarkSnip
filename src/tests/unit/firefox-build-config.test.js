@@ -43,6 +43,21 @@ describe('Firefox build configuration', () => {
     expect(firefoxManifest.browser_specific_settings?.gecko?.id).toBe('marksnip@dhruvparikh');
   });
 
+  test('loads exactly the same background modules as the Chrome service worker', () => {
+    const swSource = fs.readFileSync(path.join(srcRoot, 'service-worker.js'), 'utf8');
+    const importList = swSource.match(/importScripts\(([\s\S]*?)\);/)[1];
+    const chromeScripts = Array.from(importList.matchAll(/'([^']+\.js)'/g), m => m[1]);
+    const firefoxManifest = createFirefoxManifest(readJson('manifest.json'));
+
+    expect(chromeScripts).toEqual(expect.arrayContaining([
+      'shared/webhook-utils.js',
+      'shared/obsidian-utils.js',
+      'shared/site-rules.js',
+      'shared/download-tracker.js'
+    ]));
+    expect(firefoxManifest.background.scripts).toEqual([...chromeScripts, 'service-worker.js']);
+  });
+
   test('keeps Chrome-only manifest changes out of Firefox output', () => {
     const sourceManifest = readJson('manifest.json');
     const chromeManifest = createChromeManifest(sourceManifest);

@@ -1237,13 +1237,11 @@ function turndown(content, options, article) {
           });
         }
         
-        // Process table structure
-        const thead = node.querySelector('thead');
-        const tbody = node.querySelector('tbody');
-        const headerRow = thead?.querySelector('tr');
-        const rows = headerRow ? 
-          [headerRow, ...(tbody ? Array.from(tbody.children) : [])] :
-          (tbody ? Array.from(tbody.children) : Array.from(node.querySelectorAll('tr')));
+        // Process table structure. table.rows lists thead rows first, then every
+        // tbody (and bare tr) in order, then tfoot rows — and never rows of nested tables.
+        const rows = node.rows
+          ? Array.from(node.rows)
+          : Array.from(node.querySelectorAll('tr'));
         
         let tableMatrix = Array.from({ length: rows.length }, () => []);
         let columnWidths = [];
@@ -1272,19 +1270,31 @@ function turndown(content, options, article) {
             
             // Process the cell content through turndown
             processedContent = cellTurndownService.turndown(cellContainer.innerHTML);
+
+            // A table row must stay on one line, and a bare pipe starts a new column.
+            processedContent = processedContent
+              .trim()
+              .replace(/\s*\n\s*/g, '<br>')
+              .replace(/(?<!\\)\|/g, '\\|');
             
             // Handle rowspan and colspan (keeping original behavior)
             const colspan = parseInt(cell.getAttribute('colspan')) || 1;
             const rowspan = parseInt(cell.getAttribute('rowspan')) || 1;
             
-            // Add content to the matrix - keep existing behavior for rowspan/colspan
+            // Skip grid slots already filled by a rowspan from an earlier row
+            let startCol = 0;
+            while (tableMatrix[rowIndex][startCol] !== undefined) {
+              startCol++;
+            }
+
+            // Add content to the matrix - spanned slots repeat the cell content
             for (let i = 0; i < rowspan; i++) {
               for (let j = 0; j < colspan; j++) {
                 const targetRow = rowIndex + i;
                 if (!tableMatrix[targetRow]) {
                   tableMatrix[targetRow] = [];
                 }
-                const targetCol = tableMatrix[targetRow].length;
+                const targetCol = startCol + j;
                 
                 // Use the same content for all spanned cells (original behavior)
                 tableMatrix[targetRow][targetCol] = processedContent;
@@ -1346,6 +1356,12 @@ function turndown(content, options, article) {
           return leftSpace + safeContent + rightSpace;
         };
         
+        // Every row (header included) must have the same number of cells as the
+        // delimiter row, or GFM will not render it as a table.
+        const columnCount = Math.max(columnWidths.length, ...tableMatrix.map(row => row.length));
+        tableMatrix = tableMatrix.map(row => Array.from({ length: columnCount }, (_, i) => row[i] ?? ''));
+        columnWidths = Array.from({ length: columnCount }, (_, i) => columnWidths[i] || 0);
+
         // Build header row and separator
         if (tableMatrix.length > 0 && tableMatrix[0] && Array.isArray(tableMatrix[0])) {
           const headerContent = tableMatrix[0].map((cell, i) => formatCell(cell, i)).join('|');
@@ -1521,9 +1537,6 @@ function turndown(content, options, article) {
     }
   });
 
-  function repeat(character, count) {
-    return Array(count + 1).join(character);
-  }
 
   function convertToFencedCodeBlock(node, options) {
     const sharedApi = getCodeBlockUtilsApi();
@@ -1617,18 +1630,7 @@ function turndown(content, options, article) {
     }
     const language = detectPreLanguage(node, code);
 
-    var fenceChar = options.fence.charAt(0);
-    var fenceSize = 3;
-    var fenceInCodeRegex = new RegExp('^' + fenceChar + '{3,}', 'gm');
-
-    var match;
-    while ((match = fenceInCodeRegex.exec(code))) {
-      if (match[0].length >= fenceSize) {
-        fenceSize = match[0].length + 1;
-      }
-    }
-
-    var fence = repeat(fenceChar, fenceSize);
+    var fence = getCodeBlockUtilsApi().buildCodeFence(code, options.fence.charAt(0));
 
     return (
       '\n\n' + fence + language + '\n' +
@@ -1650,9 +1652,7 @@ function turndown(content, options, article) {
       const codeNode = node.firstChild;
       const processedCode = processCodeBlock(codeNode, options);
       
-      const fenceChar = options.fence.charAt(0);
-      const fenceSize = 3;
-      const fence = repeat(fenceChar, fenceSize);
+      const fence = getCodeBlockUtilsApi().buildCodeFence(processedCode.code, options.fence.charAt(0));
       
       return (
         '\n\n' + 
@@ -2555,7 +2555,7 @@ async function downloadMarkdownImageBundleZip({
   });
   const zipBlob = zipUtils.createStoredZipBlob(files);
   const zipUrl = URL.createObjectURL(zipBlob);
-  const zipFilename = zipUtils.buildBundleZipDownloadFilename(title, mdClipsFolder);
+  const zipFilename = getTemplateUtilsApi().sanitizeDownloadPath(zipUtils.buildBundleZipDownloadFilename(title, mdClipsFolder));
 
   let id;
   try {
@@ -2656,7 +2656,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
      const url = URL.createObjectURL(blob);
 
-     const fullFilename = mdClipsFolder + title + ".md";
+     const fullFilename = getTemplateUtilsApi().sanitizeDownloadPath(mdClipsFolder + title + ".md");
      
      console.log(`🚀 [Offscreen] Starting Downloads API download: URL=${url}, filename="${fullFilename}"`);
      
@@ -2725,7 +2725,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
      const url = URL.createObjectURL(blob);
      
      if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
-     const fullFilename = mdClipsFolder + title + ".md";
+     const fullFilename = getTemplateUtilsApi().sanitizeDownloadPath(mdClipsFolder + title + ".md");
      
      console.log(`🎯 [Offscreen] Created blob URL: ${url}, delegating to service worker`);
      

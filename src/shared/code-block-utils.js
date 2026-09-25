@@ -10,6 +10,23 @@
     return Array(count + 1).join(character);
   }
 
+  // Returns a fence one character longer than any fence-like run inside the
+  // code, so the code can never close its own block. CommonMark lets a closing
+  // fence be indented by up to three spaces, so indented runs count too.
+  function buildCodeFence(code, fenceChar) {
+    const char = String(fenceChar || '`').charAt(0) || '`';
+    const escapedChar = char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const fenceInCodeRegex = new RegExp('^ {0,3}(' + escapedChar + '{3,})', 'gm');
+    let fenceSize = 3;
+    let match;
+    while ((match = fenceInCodeRegex.exec(String(code || '')))) {
+      if (match[1].length >= fenceSize) {
+        fenceSize = match[1].length + 1;
+      }
+    }
+    return repeat(char, fenceSize);
+  }
+
   function normalizeCodeBlockSpacing(text, maxBlankLines = 2) {
     const lines = text.split('\n');
     const normalizedLines = [];
@@ -100,18 +117,7 @@
     const code = extractCodeText(node, options);
     const language = detectPreLanguage(node, code, options);
 
-    const fenceChar = options.fence.charAt(0);
-    let fenceSize = 3;
-    const fenceInCodeRegex = new RegExp('^' + fenceChar + '{3,}', 'gm');
-
-    let match;
-    while ((match = fenceInCodeRegex.exec(code))) {
-      if (match[0].length >= fenceSize) {
-        fenceSize = match[0].length + 1;
-      }
-    }
-
-    const fence = repeat(fenceChar, fenceSize);
+    const fence = buildCodeFence(code, options.fence.charAt(0));
 
     return (
       '\n\n' + fence + language + '\n' +
@@ -122,6 +128,7 @@
 
   return {
     repeat,
+    buildCodeFence,
     normalizeCodeBlockSpacing,
     extractCodeText,
     convertToFencedCodeBlock

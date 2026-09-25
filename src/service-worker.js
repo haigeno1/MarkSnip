@@ -27,7 +27,7 @@ if (typeof importScripts === 'function') {
 globalThis.markSnipDebugLogging?.configureFromStorage?.();
 globalThis.markSnipDebugLogging?.watchStorage?.();
 
-const { textReplace, generateValidFileName, protectPromptPlaceholders, stripPromptPlaceholders } = globalThis.markSnipTemplateUtils;
+const { textReplace, generateValidFileName, sanitizeDownloadPath, protectPromptPlaceholders, stripPromptPlaceholders } = globalThis.markSnipTemplateUtils;
 
 // Log platform info
 browser.runtime.getPlatformInfo().then(async platformInfo => {
@@ -836,7 +836,10 @@ async function handleWebhookSend(message) {
     const fetchOptions = {
       method: request.method,
       headers: request.headers,
-      signal: controller.signal
+      signal: controller.signal,
+      // Only the configured URL passes the private-host checks. Following a
+      // redirect would re-send the clip and headers to an unvalidated address.
+      redirect: 'manual'
     };
 
     if (request.body) {
@@ -845,6 +848,14 @@ async function handleWebhookSend(message) {
 
     const response = await fetch(request.url, fetchOptions);
     clearTimeout(timeoutId);
+
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      return {
+        success: false,
+        error: 'The webhook URL redirected to another address. Update the target to the final URL.',
+        status: response.status
+      };
+    }
 
     if (!response.ok) {
       let responseBody = '';
@@ -4544,7 +4555,8 @@ async function handleDownloadWithBlobUrl(blobUrl, filename, title = null, tabId,
     console.warn('⚠️ [Service Worker] Empty filename detected, using fallback');
     filename = 'Untitled-' + Date.now() + '.md';
   }
-  
+  filename = sanitizeDownloadPath(filename);
+
   console.log(`🚀 [Service Worker] Using Downloads API with blob URL: ${blobUrl} -> ${filename}`);
   
   if (browser.downloads || (typeof chrome !== 'undefined' && chrome.downloads)) {
@@ -4644,7 +4656,7 @@ async function _handleDownloadDirectly(markdown, title, tabId, imageList = {}, m
       
       if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
       
-      const fullFilename = mdClipsFolder + title + ".md";
+      const fullFilename = sanitizeDownloadPath(mdClipsFolder + title + ".md");
       
       console.log(`🎯 [Service Worker] Starting Downloads API: URL=${url}, filename="${fullFilename}"`);
       
@@ -4903,7 +4915,7 @@ async function downloadMarkdownImageBundleZipDirect({
     });
     const zipBlob = zipUtils.createStoredZipBlob(files);
     zipUrl = URL.createObjectURL(zipBlob);
-    const zipFilename = zipUtils.buildBundleZipDownloadFilename(title, mdClipsFolder);
+    const zipFilename = sanitizeDownloadPath(zipUtils.buildBundleZipDownloadFilename(title, mdClipsFolder));
 
     downloadTracker.trackUrl(zipUrl, {
       filename: zipFilename,
@@ -5002,7 +5014,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       
-      const fullFilename = mdClipsFolder + title + ".md";
+      const fullFilename = sanitizeDownloadPath(mdClipsFolder + title + ".md");
       
       console.log(`🚀 [Service Worker] Starting Downloads API download: URL=${url}, filename="${fullFilename}"`);
       

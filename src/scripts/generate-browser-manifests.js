@@ -53,23 +53,28 @@ function createChromeManifest(sourceManifest) {
   return chromeManifest;
 }
 
-function createFirefoxManifest(sourceManifest) {
+/**
+ * Reads the service worker's importScripts() list so the Firefox background
+ * page loads exactly the same modules as the Chrome service worker.
+ */
+function readServiceWorkerImportScripts(srcDir = SRC_DIR) {
+  const source = fs.readFileSync(path.join(srcDir, "service-worker.js"), "utf8");
+  const match = source.match(/importScripts\(([\s\S]*?)\);/);
+  if (!match) {
+    throw new Error("Could not find importScripts(...) in service-worker.js");
+  }
+  const scripts = Array.from(match[1].matchAll(/['"]([^'"]+\.js)['"]/g), m => m[1]);
+  if (scripts.length === 0) {
+    throw new Error("importScripts(...) in service-worker.js lists no scripts");
+  }
+  return scripts;
+}
+
+function createFirefoxManifest(sourceManifest, options = {}) {
   const firefoxManifest = JSON.parse(JSON.stringify(sourceManifest));
   firefoxManifest.background = {
     scripts: [
-      "shared/debug-logging.js",
-      "browser-polyfill.min.js",
-      "shared/i18n.js",
-      "background/moment.min.js",
-      "shared/notifications.js",
-      "shared/default-options.js",
-      "shared/template-utils.js",
-      "shared/url-utils.js",
-      "shared/zip-utils.js",
-      "shared/highlight-state.js",
-      "shared/interpreter-utils.js",
-      "shared/agent-bridge-state.js",
-      "shared/context-menus.js",
+      ...readServiceWorkerImportScripts(options.srcDir),
       "service-worker.js"
     ]
   };
@@ -96,7 +101,7 @@ function buildBrowserManifests(options = {}) {
   copyDirectory(srcDir, firefoxDir);
 
   const chromeManifest = createChromeManifest(sourceManifest);
-  const firefoxManifest = createFirefoxManifest(sourceManifest);
+  const firefoxManifest = createFirefoxManifest(sourceManifest, { srcDir });
 
   writeManifest(chromeDir, chromeManifest);
   writeManifest(firefoxDir, firefoxManifest);
@@ -124,5 +129,6 @@ if (require.main === module) {
 module.exports = {
   createChromeManifest,
   createFirefoxManifest,
+  readServiceWorkerImportScripts,
   buildBrowserManifests
 };

@@ -140,6 +140,13 @@
     return filename;
   }
 
+  function sanitizeDownloadPath(path) {
+    const templateUtils = getTemplateUtils();
+    return typeof templateUtils.sanitizeDownloadPath === 'function'
+      ? templateUtils.sanitizeDownloadPath(path)
+      : path;
+  }
+
   function resolveImagePath(src, options = {}) {
     const templateUtils = getTemplateUtils();
     const generateValidFileName = templateUtils.generateValidFileName;
@@ -163,17 +170,18 @@
     return {
       filename,
       imagePlacement: placement,
-      markdownPath: stripLeadingSlashes(normalizePathSeparators(relativePath)),
+      // Same sanitizing as the download path, so the Markdown link matches the saved file
+      markdownPath: sanitizeDownloadPath(stripLeadingSlashes(normalizePathSeparators(relativePath))),
       markdownTitleFolder: getMarkdownTitleFolder(title)
     };
   }
 
   function buildImageDownloadFilename(markdownImagePath, title = '', mdClipsFolder = '') {
-    return joinPathSegments(
+    return sanitizeDownloadPath(joinPathSegments(
       mdClipsFolder,
       getMarkdownTitleFolder(title),
       markdownImagePath
-    );
+    ));
   }
 
   function resolveImageDownloadPath(src, options = {}, mdClipsFolder = '') {

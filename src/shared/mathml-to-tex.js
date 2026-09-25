@@ -131,11 +131,39 @@
   }
 
   function escapeTextMode(value) {
+    // Swap backslashes out first so their replacement's braces are not escaped again.
     return String(value || '')
-      .replace(/\\/g, '\\backslash{}')
+      .replace(/\\/g, '\u0000')
       .replace(/([{}#$%&_])/g, '\\$1')
       .replace(/\^/g, '\\^{}')
-      .replace(/~/g, '\\~{}');
+      .replace(/~/g, '\\~{}')
+      .replace(/\u0000/g, '\\textbackslash{}');
+  }
+
+  // Characters with a special meaning in TeX math mode (% even starts a comment).
+  function escapeMathSpecials(value) {
+    return String(value || '').replace(/[#$%&]/g, '\\$&');
+  }
+
+  // Concatenates TeX fragments. A control word such as \alpha must be separated
+  // from a following letter, or TeX reads "\alphax" as one unknown command.
+  function joinTex(parts, separator = '') {
+    return parts.reduce((result, part, index) => {
+      const next = index > 0 ? separator + (part || '') : (part || '');
+      if (/\\[A-Za-z]+$/.test(result) && /^[A-Za-z]/.test(next)) {
+        return `${result} ${next}`;
+      }
+      return result + next;
+    }, '');
+  }
+
+  function texDelimiter(value) {
+    if (value === '') return '.';
+    if (value === '{') return '\\{';
+    if (value === '}') return '\\}';
+    if (value === '〈' || value === '⟨') return '\\langle';
+    if (value === '〉' || value === '⟩') return '\\rangle';
+    return value;
   }
 
   function brace(value) {
@@ -183,7 +211,7 @@
     const value = normalizedText(node);
     if (!value) return '';
     if (greekMap[value]) return greekMap[value];
-    if (value.length === 1) return value;
+    if (value.length === 1) return escapeMathSpecials(value);
     return `\\mathrm{${escapeTextMode(value)}}`;
   }
 
@@ -195,7 +223,7 @@
     if (value === '}') return '\\}';
     if (value === '\u2329') return '\\langle';
     if (value === '\u232a') return '\\rangle';
-    return value;
+    return escapeMathSpecials(value);
   }
 
   function convertWordLikeMrow(children) {
@@ -248,7 +276,7 @@
       if (table) return convertMtable(table, 'cases');
     }
 
-    return children.map(convertNode).join('');
+    return joinTex(children.map(convertNode));
   }
 
   function convertMtable(node, environment) {
@@ -267,12 +295,13 @@
   }
 
   function convertMfenced(node) {
-    const open = node.getAttribute('open') || '(';
-    const close = node.getAttribute('close') || ')';
-    const separators = node.getAttribute('separators') || ',';
-    const separator = separators.charAt(0) || ',';
-    const content = elementChildren(node).map(convertNode).join(separator);
-    return `\\left${open}${content}\\right${close}`;
+    // Attributes that are present but empty are meaningful (no fence / no separator).
+    const open = node.hasAttribute('open') ? node.getAttribute('open').trim() : '(';
+    const close = node.hasAttribute('close') ? node.getAttribute('close').trim() : ')';
+    const separators = node.hasAttribute('separators') ? node.getAttribute('separators').trim() : ',';
+    const separator = separators.charAt(0);
+    const content = joinTex(elementChildren(node).map(convertNode), separator);
+    return joinTex([`\\left${texDelimiter(open)}`, content, `\\right${texDelimiter(close)}`]);
   }
 
   function convertMover(node) {
@@ -305,7 +334,7 @@
   }
 
   function convertChildren(node) {
-    return elementChildren(node).map(convertNode).join('');
+    return joinTex(elementChildren(node).map(convertNode));
   }
 
   function convertNode(node) {
@@ -325,7 +354,7 @@
       case 'mi':
         return convertIdentifier(node);
       case 'mn':
-        return normalizedText(node);
+        return escapeMathSpecials(normalizedText(node));
       case 'mo':
         return convertOperator(node);
       case 'mtext':

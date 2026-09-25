@@ -805,11 +805,72 @@ describe('Options page search UI', () => {
     unnamedInput.removeAttribute('name');
     unnamedInput.value = 'unsaved secret';
 
-    unnamedInput.dispatchEvent(new dom.window.KeyboardEvent('keyup', { bubbles: true }));
+    unnamedInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     await waitFor(dom.window, 600);
 
     expect(browser.storage.sync.set).not.toHaveBeenCalledWith(expect.objectContaining({
       '': 'unsaved secret'
+    }));
+  });
+
+  test('saves a text field edited without key events (paste, drag-and-drop)', async () => {
+    const { dom, browser } = createOptionsPageDom();
+    const { document } = dom.window;
+
+    document.dispatchEvent(new dom.window.Event('DOMContentLoaded', { bubbles: true }));
+    await waitForMicrotasks();
+    await waitFor(dom.window, 50);
+
+    const title = document.getElementById('title');
+    title.value = 'Pasted {pageTitle}';
+    title.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    await waitFor(dom.window, 600);
+
+    expect(browser.storage.sync.set).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Pasted {pageTitle}'
+    }));
+  });
+
+  test('editing a second field quickly does not drop the first field\'s save', async () => {
+    const { dom, browser } = createOptionsPageDom();
+    const { document } = dom.window;
+
+    document.dispatchEvent(new dom.window.Event('DOMContentLoaded', { bubbles: true }));
+    await waitForMicrotasks();
+    await waitFor(dom.window, 50);
+
+    const title = document.getElementById('title');
+    const disallowed = document.getElementById('disallowedChars');
+    title.value = 'First field';
+    title.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    await waitFor(dom.window, 100);
+    disallowed.value = '[]#^';
+    disallowed.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    await waitFor(dom.window, 600);
+
+    const savedTitles = browser.storage.sync.set.mock.calls.map(([saved]) => saved.title);
+    expect(savedTitles).toContain('First field');
+    expect(browser.storage.sync.set).toHaveBeenLastCalledWith(expect.objectContaining({
+      title: 'First field',
+      disallowedChars: '[]#^'
+    }));
+  });
+
+  test('saves a pending edit when the page is hidden before the debounce fires', async () => {
+    const { dom, browser } = createOptionsPageDom();
+    const { document } = dom.window;
+
+    document.dispatchEvent(new dom.window.Event('DOMContentLoaded', { bubbles: true }));
+    await waitForMicrotasks();
+    await waitFor(dom.window, 50);
+
+    const title = document.getElementById('title');
+    title.value = 'Closed quickly';
+    title.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+
+    expect(browser.storage.sync.set).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Closed quickly'
     }));
   });
 

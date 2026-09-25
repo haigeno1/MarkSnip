@@ -249,4 +249,21 @@ describe('URL utils', () => {
       }
     });
   });
+
+  describe('image paths for titles the downloads API would reject', () => {
+    test.each([
+      ['.NET 9 released', 'NET 9 released/logo.png', 'Clips/NET 9 released/logo.png'],
+      ['Smith Jr./Hmm', 'Hmm/logo.png', 'Clips/Smith Jr/Hmm/logo.png']
+    ])('title %j: Markdown link and saved file agree', (title, link, saved) => {
+      const { resolveImageDownloadPath } = require('../../shared/url-utils');
+      const result = resolveImageDownloadPath('https://x.com/a/logo.png', {
+        title,
+        imagePrefix: '{pageTitle}/',
+        disallowedChars: '',
+        disallowedCharReplacement: ''
+      }, 'Clips/');
+      expect(result.markdownPath).toBe(link);
+      expect(result.downloadFilename).toBe(saved);
+    });
+  });
 });

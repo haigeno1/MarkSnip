@@ -3633,6 +3633,23 @@ function getInterpreterTemplateUtils() {
     return globalThis.markSnipTemplateUtils || null;
 }
 
+// Sanitize per "/" segment so title-folder separators are preserved,
+// matching offscreen/service-worker formatTitle behavior.
+function toFilenameSafeTitle(title) {
+    const tmpl = getInterpreterTemplateUtils();
+    if (!tmpl?.generateValidFileName) {
+        return title;
+    }
+    return String(title)
+        .split('/')
+        .map((segment) => tmpl.generateValidFileName(
+            segment,
+            currentOptions?.disallowedChars,
+            currentOptions?.disallowedCharReplacement
+        ))
+        .join('/');
+}
+
 function setInterpreterSectionVisible(visible) {
     if (dom.interpreterSection) {
         dom.interpreterSection.style.display = visible ? '' : 'none';
@@ -3884,16 +3901,7 @@ async function runInterpreter() {
         response.promptResponses
     );
     if (tmpl?.generateValidFileName) {
-        // Sanitize per "/" segment so title-folder separators are preserved,
-        // matching offscreen/service-worker formatTitle behavior.
-        newTitle = String(newTitle)
-            .split('/')
-            .map((segment) => tmpl.generateValidFileName(
-                segment,
-                currentOptions.disallowedChars,
-                currentOptions.disallowedCharReplacement
-            ))
-            .join('/');
+        newTitle = toFilenameSafeTitle(newTitle);
     }
 
     setEditorValue(newMarkdown);
@@ -5039,7 +5047,9 @@ function sendDownloadMessage(text, title = dom.titleInput?.value || '') {
             const message = {
                 type: "download",
                 markdown: text,
-                title,
+                // The title field is user-editable, so it can contain characters
+                // such as ":" or "?" that the downloads API rejects.
+                title: toFilenameSafeTitle(title),
                 tab,
                 imageList: imageList,
                 mdClipsFolder: mdClipsFolder,
