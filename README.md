@@ -83,13 +83,13 @@ Run your own prompts against a clip through an LLM provider you configure, then 
 
 ## Screenshots
 
-| Clip an article | Markdown preview | Dark mode |
+| Clip an article | Tables, code and math | Reader View and highlights |
 | --- | --- | --- |
-| ![Clipping an article](docs/store-screenshots/01-clip-article.png) | ![Rendered preview](docs/store-screenshots/02-preview-mode.png) | ![Dark mode popup](docs/store-screenshots/03-dark-mode.png) |
+| ![Clipping an article](docs/store-screenshots/01-clip-article.png) | ![Tables, code and math in dark mode](docs/store-screenshots/02-code-tables-math.png) | ![Reader View with highlights](docs/store-screenshots/03-reader-highlights.png) |
 
-| Options | Batch processing |
+| Batch processing | Send anywhere |
 | --- | --- |
-| ![Options page](docs/store-screenshots/04-options-page.png) | ![Batch processing](docs/store-screenshots/05-batch-processing.png) |
+| ![Batch processing](docs/store-screenshots/04-batch-processing.png) | ![Export destinations](docs/store-screenshots/05-send-anywhere.png) |
 
 ## Install
 
