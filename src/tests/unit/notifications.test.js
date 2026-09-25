@@ -112,6 +112,7 @@ describe('notification helpers', () => {
 
     state = notifications.markNotificationShown(state, 'version-update:4.1.1', 12345);
 
+    expect(notifications.getNextPendingNotification(state)?.id).toBe('version-update:4.1.1');
     expect(state.pendingNotifications).toHaveLength(1);
     expect(state.pendingNotifications[0]).toEqual(
       expect.objectContaining({
@@ -120,5 +121,28 @@ describe('notification helpers', () => {
         lastShownAt: 12345
       })
     );
+  });
+
+  test('shows a never-shown card before one the user already saw and ignored', () => {
+    const now = Date.now();
+    const state = notifications.ensureNotificationState({
+      pendingNotifications: [
+        { id: 'version-update:9.9.9', type: 'version-update', createdAt: now, showCount: 1 },
+        { id: 'support-milestone:50', type: 'support-milestone', createdAt: now, showCount: 0 }
+      ]
+    });
+
+    expect(notifications.getNextPendingNotification(state).id).toBe('support-milestone:50');
+  });
+
+  test('falls back to an already-shown card when every card has been shown', () => {
+    const state = notifications.ensureNotificationState({
+      pendingNotifications: [
+        { id: 'support-milestone:50', type: 'support-milestone', createdAt: 2, showCount: 1 },
+        { id: 'version-update:9.9.9', type: 'version-update', createdAt: 1, showCount: 2 }
+      ]
+    });
+
+    expect(notifications.getNextPendingNotification(state).id).toBe('version-update:9.9.9');
   });
 });

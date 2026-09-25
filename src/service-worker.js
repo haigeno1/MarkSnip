@@ -95,6 +95,8 @@ const HIGHLIGHT_MANAGER_PAGE = 'highlights/highlights.html';
 const READER_PAGE = 'reader/reader.html';
 const READER_SESSION_PREFIX = 'reader-session:';
 const READER_SESSION_TTL_MS = 60 * 60 * 1000;
+// Each Reader View open stores the full article; keep only the most recent ones.
+const READER_SESSION_MAX_STORED = 25;
 let highlightIndexCache = null;
 let readerCssTextCache = null;
 let releaseHighlightsCachePromise = null;
@@ -1130,6 +1132,13 @@ async function handleMessages(message, sender, _sendResponse) {
     case "markdown-result":
       await handleMarkdownResult(message);
       break;
+    case "process-error":
+      // Without this the popup keeps its spinner up forever.
+      await browser.runtime.sendMessage({
+        type: "display.error",
+        error: message.error || 'The page could not be converted to Markdown.'
+      }).catch(() => {});
+      break;
     case "download-complete":
       handleDownloadComplete(message);
       break;
@@ -1171,12 +1180,16 @@ async function handleMessages(message, sender, _sendResponse) {
         message.imageList,
         message.mdClipsFolder,
         message.options,
-        message.notificationDelta
+        message.notificationDelta,
+        message.markdown
       );
       break;
     case "offscreen-download-failed":
-      // Legacy fallback - shouldn't be used anymore
-      console.log(`⚠️ [Service Worker] Legacy offscreen-download-failed: ${message.error}`);
+      // The offscreen page (Firefox) could not start the download itself.
+      console.error(`[Service Worker] Offscreen download failed: ${message.error}`);
+      if (!isUserCanceledDownloadError(message.error)) {
+        await saveMarkdownViaPageLink(message.markdown, message.title, message.tabId, message.options, message.notificationDelta);
+      }
       break;
     case "open-obsidian-uri":
       await openObsidianUri(message.vault, message.folder, message.title);
@@ -3444,25 +3457,64 @@ async function toggleReaderViewFromMessage(message, sender) {
   return await toggleReaderViewForTab(targetTab);
 }
 
+function getReaderSessionStorage() {
+  return browser.storage.session || browser.storage.local;
+}
+
+function isStorageQuotaError(error) {
+  return /quota/i.test(String(error?.message || error || ''));
+}
+
+// Stored reader sessions, oldest first.
+async function listReaderSessionKeys(storage) {
+  const all = await storage.get(null);
+  return Object.entries(all || {})
+    .filter(([key]) => key.startsWith(READER_SESSION_PREFIX))
+    .sort(([, a], [, b]) => Number(a?.capturedAt || 0) - Number(b?.capturedAt || 0))
+    .map(([key]) => key);
+}
+
+/**
+ * Stores a reader session. Older sessions are dropped so the total stays under
+ * READER_SESSION_MAX_STORED, and more are dropped (oldest first) if storage is full.
+ */
+async function writeReaderSession(key, entry) {
+  const storage = getReaderSessionStorage();
+  const existing = (await listReaderSessionKeys(storage)).filter((storedKey) => storedKey !== key);
+  const excess = existing.length - (READER_SESSION_MAX_STORED - 1);
+  if (excess > 0) {
+    await storage.remove(existing.splice(0, excess));
+  }
+
+  for (;;) {
+    try {
+      await storage.set({ [key]: entry });
+      return;
+    } catch (error) {
+      if (!isStorageQuotaError(error) || existing.length === 0) {
+        throw error;
+      }
+      await storage.remove(existing.shift());
+    }
+  }
+}
+
 async function saveReaderSession(session) {
   const sessionId = createReaderSessionId();
   const entry = {
     ...session,
     capturedAt: Date.now()
   };
-  if (browser.storage.session) {
-    await browser.storage.session.set({ [sessionId]: entry });
-  } else {
-    await browser.storage.local.set({ [READER_SESSION_PREFIX + sessionId]: entry });
-  }
+  await writeReaderSession(READER_SESSION_PREFIX + sessionId, entry);
   return sessionId;
 }
 
 async function readReaderSession(sessionId) {
   if (!sessionId) return null;
   if (browser.storage.session) {
-    const stored = await browser.storage.session.get(sessionId);
-    if (stored?.[sessionId]) return stored[sessionId];
+    const sessionKey = READER_SESSION_PREFIX + sessionId;
+    const stored = await browser.storage.session.get(sessionKey);
+    if (stored?.[sessionKey]) return stored[sessionKey];
   }
   const key = READER_SESSION_PREFIX + sessionId;
   const stored = await browser.storage.local.get(key);
@@ -3481,11 +3533,7 @@ async function updateReaderSession(sessionId, session) {
     ...session,
     capturedAt: session.capturedAt || Date.now()
   };
-  if (browser.storage.session) {
-    await browser.storage.session.set({ [sessionId]: updated });
-  } else {
-    await browser.storage.local.set({ [READER_SESSION_PREFIX + sessionId]: updated });
-  }
+  await writeReaderSession(READER_SESSION_PREFIX + sessionId, updated);
   return updated;
 }
 
@@ -4398,29 +4446,39 @@ async function copyTabAsMarkdownLink(tab) {
 }
 
 /**
- * Copy all tabs as markdown links
+ * Copy the given tabs as a Markdown list of links. One tab failing (for example
+ * a chrome:// page, where scripts cannot run) must not lose the others, so such
+ * tabs fall back to the browser's own title and URL for the tab.
  */
-async function copyTabAsMarkdownLinkAll(tab) {
+async function copyTabsAsMarkdownLinks(tabs, sourceTab) {
   try {
     await ensureOffscreenDocumentExists();
     const options = await getOptions();
-    const tabs = await browser.tabs.query({
-      currentWindow: true
-    });
-    
+
     const links = [];
     for (const currentTab of tabs) {
-      await ensureScripts(currentTab.id);
-      const article = await getArticleFromContent(currentTab.id, false, options);
-      const resolved = resolveOptionsForPageUrl(getArticlePageUrl(article, currentTab), options);
-      const title = await formatTitle(article, resolved.options);
-      const pageUrl = getArticlePageUrl(article, currentTab);
-      const link = `${resolved.options.bulletListMarker} [${title}](${pageUrl})`;
-      links.push(link);
+      let title = currentTab.title || currentTab.url || '';
+      let pageUrl = currentTab.url || '';
+      let bulletListMarker = options.bulletListMarker;
+      if (!isRestrictedTabUrl(pageUrl)) {
+        try {
+          await ensureScripts(currentTab.id);
+          const article = await getArticleFromContent(currentTab.id, false, options);
+          pageUrl = getArticlePageUrl(article, currentTab);
+          const resolved = resolveOptionsForPageUrl(pageUrl, options);
+          title = await formatTitle(article, resolved.options);
+          bulletListMarker = resolved.options.bulletListMarker;
+        } catch (error) {
+          console.warn(`Using the tab's own title for ${pageUrl}:`, error?.message || error);
+        }
+      }
+      if (pageUrl) {
+        links.push(`${bulletListMarker} [${title}](${pageUrl})`);
+      }
     }
-    
+
     const markdown = links.join('\n');
-    
+
     const copied = await browser.runtime.sendMessage({
       target: 'offscreen',
       type: 'copy-to-clipboard',
@@ -4429,57 +4487,33 @@ async function copyTabAsMarkdownLinkAll(tab) {
     });
     if (copied) {
       await recordNotificationMetricsSafely({ copies: 1, exports: 0 }, {
-        tabId: tab.id
+        tabId: sourceTab?.id
       });
     }
   } catch (error) {
-    console.error("Failed to copy all tabs as markdown links:", error);
+    console.error("Failed to copy tabs as markdown links:", error);
   }
+}
+
+/**
+ * Copy all tabs as markdown links
+ */
+async function copyTabAsMarkdownLinkAll(tab) {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  await copyTabsAsMarkdownLinks(tabs, tab);
 }
 
 /**
  * Copy selected tabs as markdown links
  */
 async function copySelectedTabAsMarkdownLink(tab) {
-  try {
-    await ensureOffscreenDocumentExists();
-    const options = await getOptions();
-    const tabs = await browser.tabs.query({
-      currentWindow: true,
-      highlighted: true
-    });
-
-    const links = [];
-    for (const selectedTab of tabs) {
-      await ensureScripts(selectedTab.id);
-      const article = await getArticleFromContent(selectedTab.id, false, options);
-      const resolved = resolveOptionsForPageUrl(getArticlePageUrl(article, selectedTab), options);
-      const title = await formatTitle(article, resolved.options);
-      const pageUrl = getArticlePageUrl(article, selectedTab);
-      const link = `${resolved.options.bulletListMarker} [${title}](${pageUrl})`;
-      links.push(link);
-    }
-
-    const markdown = links.join(`\n`);
-    
-    const copied = await browser.runtime.sendMessage({
-      target: 'offscreen',
-      type: 'copy-to-clipboard',
-      text: markdown,
-      options: options
-    });
-    if (copied) {
-      await recordNotificationMetricsSafely({ copies: 1, exports: 0 }, {
-        tabId: tab.id
-      });
-    }
-  } catch (error) {
-    console.error("Failed to copy selected tabs as markdown links:", error);
-  }
+  const tabs = await browser.tabs.query({ currentWindow: true, highlighted: true });
+  await copyTabsAsMarkdownLinks(tabs, tab);
 }
 
 /**
- * Download markdown for all tabs
+ * Download markdown for all tabs. Pages scripts cannot run on are skipped, and
+ * one tab failing does not stop the rest.
  */
 async function downloadMarkdownForAllTabs(info) {
   const tabs = await browser.tabs.query({
@@ -4487,7 +4521,14 @@ async function downloadMarkdownForAllTabs(info) {
   });
   
   for (const tab of tabs) {
-    await downloadMarkdownFromContext(info, tab);
+    if (isRestrictedTabUrl(tab.url || '')) {
+      continue;
+    }
+    try {
+      await downloadMarkdownFromContext(info, tab);
+    } catch (error) {
+      console.error(`Failed to download ${tab.url}:`, error);
+    }
   }
 }
 
@@ -4547,7 +4588,42 @@ async function getArticleFromContent(tabId, selection = false, options = null) {
 /**
  * Handle download using blob URL created by offscreen document
  */
-async function handleDownloadWithBlobUrl(blobUrl, filename, title = null, tabId, imageList = {}, mdClipsFolder = '', options = null, notificationDelta = SINGLE_DOWNLOAD_NOTIFICATION_DELTA) {
+function isUserCanceledDownloadError(error) {
+  return /cancel/i.test(String(error?.message || error || ''));
+}
+
+/**
+ * Last resort when the Downloads API refuses a Markdown file: save it from the
+ * page with a data: link, the same mechanism as the "content link" download mode.
+ * Returns false when the page cannot run scripts (for example chrome:// pages).
+ */
+async function saveMarkdownViaPageLink(markdown, title, tabId, options = null, notificationDelta = null) {
+  if (typeof markdown !== 'string' || !Number.isInteger(tabId)) {
+    return false;
+  }
+
+  try {
+    const baseName = String(title || '').split('/').pop().replace(/\.md$/i, '').trim() || 'Untitled';
+    const filename = generateValidFileName(baseName, options?.disallowedChars, options?.disallowedCharReplacement) + '.md';
+    await browser.scripting.executeScript({
+      target: { tabId },
+      func: (filename, content) => {
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = `data:text/markdown;base64,${content}`;
+        link.click();
+      },
+      args: [filename, base64EncodeUnicode(markdown)]
+    });
+    await recordNotificationMetricsSafely(notificationDelta, { tabId });
+    return true;
+  } catch (error) {
+    console.error('[Service Worker] Could not save the Markdown from the page either:', error);
+    return false;
+  }
+}
+
+async function handleDownloadWithBlobUrl(blobUrl, filename, title = null, tabId, imageList = {}, mdClipsFolder = '', options = null, notificationDelta = SINGLE_DOWNLOAD_NOTIFICATION_DELTA, markdown = null) {
   if (!options) options = await getOptions();
   
   // CRITICAL: Ensure filename is never empty
@@ -4608,22 +4684,17 @@ async function handleDownloadWithBlobUrl(blobUrl, filename, title = null, tabId,
       
     } catch (err) {
       console.error("❌ [Service Worker] Downloads API with blob URL failed:", err);
-      
-      // Final fallback: use blob URL with content script
-      await ensureScripts(tabId);
-      
-      await browser.scripting.executeScript({
-        target: { tabId: tabId },
-        func: (blobUrl, filename) => {
-          // Use the blob URL directly for download
-          const link = document.createElement('a');
-          link.download = filename;
-          link.href = blobUrl;
-          link.click();
-        },
-        args: [blobUrl, filename.split('/').pop()] // Just the filename, not path
-      });
-      await recordNotificationMetricsSafely(notificationDelta, { tabId });
+      // Release the offscreen blob and our tracking entries for it.
+      downloadTracker.cleanupTrackedDownload(null, blobUrl);
+
+      // A cancelled Save As dialog is the user's decision, not a failure.
+      if (isUserCanceledDownloadError(err)) {
+        return;
+      }
+
+      // The blob URL belongs to the extension's origin, so a page cannot use it;
+      // save the Markdown text itself through the page instead.
+      await saveMarkdownViaPageLink(markdown, title || filename, tabId, options, notificationDelta);
     }
   } else {
     console.error("❌ [Service Worker] No Downloads API available");
@@ -4987,7 +5058,8 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
   else if (options.downloadMode === 'downloadsApi' && (browser.downloads || (typeof chrome !== 'undefined' && chrome.downloads))) {
     // Direct Downloads API handling (Firefox or when offscreen delegates back)
     const downloadsAPI = browser.downloads || chrome.downloads;
-    
+    let url = null;
+
     try {
       if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
 
@@ -5012,10 +5084,10 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
 
       // Create blob URL
       const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      
+      url = URL.createObjectURL(blob);
+
       const fullFilename = sanitizeDownloadPath(mdClipsFolder + title + ".md");
-      
+
       console.log(`🚀 [Service Worker] Starting Downloads API download: URL=${url}, filename="${fullFilename}"`);
       
       // CRITICAL: Set up URL tracking BEFORE calling download API
@@ -5057,6 +5129,14 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       }
     } catch (err) {
       console.error("❌ [Service Worker] Downloads API failed", err);
+      if (url && !Array.from(markSnipDownloads.values()).some((info) => info?.url === url)) {
+        // The download never started: release the blob and its tracking entries.
+        downloadTracker.cleanupTrackedDownload(null, url);
+        URL.revokeObjectURL(url);
+        if (!isUserCanceledDownloadError(err)) {
+          await saveMarkdownViaPageLink(markdown, title, tabId, options, resolvedNotificationDelta);
+        }
+      }
     }
   }
   else {

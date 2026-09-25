@@ -11,12 +11,12 @@
 
   async function readReaderSession(id) {
     if (!id) return null;
+    const key = LOCAL_SESSION_PREFIX + id;
     if (root.browser?.storage?.session) {
-      const stored = await root.browser.storage.session.get(id);
-      if (stored?.[id]) return stored[id];
+      const stored = await root.browser.storage.session.get(key);
+      if (stored?.[key]) return stored[key];
     }
 
-    const key = LOCAL_SESSION_PREFIX + id;
     const stored = await root.browser.storage.local.get(key);
     const entry = stored?.[key];
     if (!entry) return null;

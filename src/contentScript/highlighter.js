@@ -572,8 +572,9 @@
 
   function getElementForHighlight(highlight) {
     if (getActiveSurface()) {
-      const surfaceElement = getElementBySurfaceXPath(highlight?.xpath || '');
-      if (surfaceElement) return surfaceElement;
+      // A page XPath means nothing inside Reader View; resolving it against the
+      // page document would draw the highlight on unrelated (hidden) content.
+      return getElementBySurfaceXPath(highlight?.xpath || '');
     }
     return api.getElementByXPath(document, highlight?.xpath || '');
   }
@@ -734,6 +735,9 @@
   }
 
   function getTextSearchRoots() {
+    if (getActiveSurface()) {
+      return [getSurfaceContentRoot()];
+    }
     const roots = [];
     const addRoot = (root) => {
       if (root && !roots.includes(root)) roots.push(root);
@@ -761,7 +765,9 @@
     const element = getElementForHighlight(highlight);
     const range = api.createRangeFromOffsets(element, highlight.startOffset, highlight.endOffset);
     if (range) return range;
-    if (isReaderSurfaceHighlight(highlight) && !getActiveSurface()) {
+    // Highlights made on the other surface (reader ↔ page) are placed by their
+    // text, and only where that text occurs exactly once.
+    if (isReaderSurfaceHighlight(highlight) !== !!getActiveSurface()) {
       return findUniqueTextRange(highlight.text || highlight.contentText || highlight.contentHtml);
     }
     return null;

@@ -5678,6 +5678,9 @@ function notify(message) {
         }
         refreshEditor();
     }
+    else if (message.type === "display.error") {
+        showError(message.error);
+    }
     else if (message.type === "batch-progress") {
         progressUI.show();
         setBatchFooterVisible(false);

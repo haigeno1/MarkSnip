@@ -165,9 +165,12 @@
     });
   }
 
+  // Cards not yet shown come first, so one card the user ignored cannot block
+  // every later card from appearing.
   function getNextPendingNotification(state) {
     const nextState = ensureNotificationState(state);
-    return sortPendingNotifications(nextState.pendingNotifications)[0] || null;
+    const sorted = sortPendingNotifications(nextState.pendingNotifications);
+    return sorted.find((notification) => notification.showCount === 0) || sorted[0] || null;
   }
 
   function upsertNotification(state, notification) {

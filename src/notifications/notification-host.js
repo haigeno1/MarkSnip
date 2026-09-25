@@ -531,6 +531,14 @@
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.textContent = action.label;
+      // Following the card's link is the user acting on it, same as dismissing it.
+      anchor.addEventListener('click', () => {
+        void sendRuntimeMessage({
+          type: 'dismiss-notification',
+          notificationId: this.notification.id
+        }).catch(() => {});
+        this.remove();
+      });
 
       if (showArrow) {
         const arrow = document.createElement('span');

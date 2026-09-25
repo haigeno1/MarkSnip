@@ -377,8 +377,8 @@ async function buildMarkdownResultFromPageContent(data, options = defaultOptions
 }
 
 async function processContent(message) {
+  const { data, requestId, options } = message;
   try {
-    const { data, requestId, options } = message;
     const result = await buildMarkdownResultFromPageContent(data, options || defaultOptions);
 
     // Send results back to service worker
@@ -389,10 +389,11 @@ async function processContent(message) {
     });
   } catch (error) {
     console.error('Error processing content:', error);
-    // Notify service worker of error
+    // Notify service worker of error so it can tell the waiting popup
     await browser.runtime.sendMessage({
       type: 'process-error',
-      error: error.message
+      requestId,
+      error: error?.message || String(error)
     });
   }
 }
@@ -2629,6 +2630,8 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
  if (options.downloadMode === 'downloadsApi' && hasDownloadsAPI) {
    // Downloads API is available in offscreen - use it directly
    const downloadsAPI = browser.downloads || chrome.downloads;
+   let url = null;
+   let downloadStarted = false;
 
    try {
      if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
@@ -2654,10 +2657,10 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
 
      // Create blob for markdown content
      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-     const url = URL.createObjectURL(blob);
+     url = URL.createObjectURL(blob);
 
      const fullFilename = getTemplateUtilsApi().sanitizeDownloadPath(mdClipsFolder + title + ".md");
-     
+
      console.log(`🚀 [Offscreen] Starting Downloads API download: URL=${url}, filename="${fullFilename}"`);
      
      // CRITICAL: Notify service worker to track this URL BEFORE starting download
@@ -2676,6 +2679,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
        filename: fullFilename,
        saveAs: options.saveAs
      });
+     downloadStarted = true;
 
      console.log(`✅ [Offscreen] Downloads API download started with ID: ${id}`);
      
@@ -2701,8 +2705,17 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
        });
      }
    } catch (err) {
+     if (downloadStarted) {
+       // The Markdown file is already downloading; only a later step (images) failed.
+       console.error("❌ [Offscreen] Post-download step failed:", err);
+       return;
+     }
      console.error("❌ [Offscreen] Downloads API failed, notifying service worker to take over:", err);
-     
+     if (url) {
+       await browser.runtime.sendMessage({ type: 'untrack-download-url', url }).catch(() => {});
+       URL.revokeObjectURL(url);
+     }
+
      // Signal service worker to take over the download
      await browser.runtime.sendMessage({
        type: 'offscreen-download-failed',
@@ -2712,6 +2725,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
        imageList: imageList,
        mdClipsFolder: mdClipsFolder,
        options: options,
+       notificationDelta: notificationDelta,
        error: err.message
      });
    }
@@ -2739,7 +2753,9 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
         imageList: imageList,
         mdClipsFolder: mdClipsFolder,
         options: options,
-        notificationDelta: notificationDelta
+        notificationDelta: notificationDelta,
+        // Lets the service worker save the text through the page if the Downloads API refuses it
+        markdown: markdown
       });
    } catch (err) {
      console.error("❌ [Offscreen] Failed to create blob, falling back to content script:", err);

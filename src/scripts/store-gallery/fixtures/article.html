@@ -1,0 +1,65 @@
+<!doctype html>
+<!-- Fixture for build-store-gallery.js: an original article on a fictional site, with typical page clutter. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why plain text outlives every app</title>
+<meta name="author" content="Ada Park">
+<meta name="keywords" content="markdown, notes, plain text">
+<meta name="description" content="File formats come and go. The notes that survive are the ones you can open in anything.">
+<meta property="og:site_name" content="The Longhand">
+<meta property="article:published_time" content="2026-09-18T09:00:00Z">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">The Longhand</div>
+  <nav><a href="#">Tech</a><a href="#">Culture</a><a href="#">Science</a><a href="#">Opinion</a><a href="#">Podcasts</a></nav>
+  <a class="subscribe" href="#">Subscribe</a>
+</header>
+<div class="ad-strip">ADVERTISEMENT · <b>Upgrade your desk setup: 40% off monitors this week only</b></div>
+<div class="layout">
+  <main>
+    <article>
+      <h1>Why plain text outlives every app</h1>
+      <p class="byline">By <span>Ada Park</span> · September 18, 2026 · 6 min read</p>
+      <figure>
+        <img src="/img/hero.svg" alt="Hills at dawn" width="1200" height="520">
+        <figcaption>The tools change. The files don't have to.</figcaption>
+      </figure>
+      <p>For a decade I trusted my notes to whatever app was fashionable. Every few years the app shut down, changed its pricing, or quietly broke its export, and I was left holding a tangle of <strong>proprietary HTML</strong>.</p>
+      <p>Plain text is the only format that has never let me down. It opens everywhere, diffs cleanly in version control, and it will still open in thirty years. Markdown adds just enough structure — headings, links, lists — without locking anything in.</p>
+      <h2>The formats that stuck</h2>
+      <table>
+        <thead><tr><th>Format</th><th>Since</th><th>Opens?</th></tr></thead>
+        <tbody>
+          <tr><td>Plain text</td><td>1963</td><td>Everywhere</td></tr>
+          <tr><td>Markdown</td><td>2004</td><td>Everywhere</td></tr>
+          <tr><td>Word .doc</td><td>1997</td><td>Usually</td></tr>
+          <tr><td>Note app DB</td><td>2011</td><td>Rarely</td></tr>
+        </tbody>
+      </table>
+      <h2>A back-of-the-envelope model</h2>
+      <p>If a format loses tools at a steady rate <math><mi>λ</mi></math>, its half-life is:</p>
+      <math display="block"><msub><mi>t</mi><mrow><mn>1</mn><mo>/</mo><mn>2</mn></mrow></msub><mo>=</mo><mfrac><mrow><mi>ln</mi><mo>&#x2061;</mo><mn>2</mn></mrow><mi>λ</mi></mfrac></math>
+      <p>For plain text, <math><mi>λ</mi></math> is effectively zero.</p>
+      <h2>Keep it scriptable</h2>
+      <p>Because the notes are just files, a few lines of code can index all of them:</p>
+      <pre><code class="language-python">from pathlib import Path
+
+for note in sorted(Path("notes").glob("*.md")):
+    words = len(note.read_text().split())
+    print(f"{note.stem}: {words} words")</code></pre>
+      <blockquote><p>The trick was never a better app. It is keeping what you write in a form you can read without anyone's permission.</p></blockquote>
+      <p>So clip the page, keep the Markdown, and let the apps come and go.</p>
+    </article>
+  </main>
+  <aside>
+    <div class="ad"><span>AD</span><p>Sponsored</p><button>Shop now</button></div>
+    <div class="trending"><h4>Trending</h4><ol><li>The 12 best keyboards of 2026</li><li>Is your smart fridge spying on you?</li><li>We tried every note app so you don't have to</li></ol></div>
+    <div class="newsletter"><h4>Get The Longhand daily</h4><input placeholder="you@email.com"><button>Sign up</button></div>
+  </aside>
+</div>
+<div class="cookie">We use cookies to personalise content and ads. <button>Accept all</button><button class="ghost">Manage</button></div>
+</body>
+</html>
