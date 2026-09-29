@@ -1,5 +1,26 @@
 # Changelog
 
+## 5.3.0
+
+### User Highlights
+
+- A new opt-in setting bundles the Markdown file and all its images into one .zip download, keeping the image folder layout so links still work after unzipping.
+- Downloads are more dependable: filenames Chrome used to reject with "Invalid filename" are cleaned automatically, and if the browser refuses a download, MarkSnip saves the file another way instead of failing.
+- On Firefox, webhooks, Obsidian export, site rules and the "Copy as Markdown Link" tab menu items work again.
+- Tables, code blocks and math convert more accurately, with correct handling of pipes, multi-line and rowspan cells, nested code fences, and special characters in TeX.
+- The popup now shows an error instead of spinning forever when a clip fails, links inside highlights are clickable again with the highlighter off, and highlights land in the right place in Reader View.
+
+### Technical Notes
+
+- **Image ZIP Bundling**: Added the `imageBundleZip` option (default off), shown only when Download Images and Downloads API mode are active. A dependency-free, binary-safe ZIP encoder lives in `shared/zip-utils.js` and is used by both the offscreen and service-worker download paths. Images are fetched in parallel with `Promise.allSettled`, so one failed image is skipped rather than aborting the bundle, and any bundling failure falls back to per-image downloads. ZIP entries set the UTF-8 flag so non-ASCII names extract correctly on Windows.
+- **Download Paths**: Added `sanitizeDownloadPath()` at every download call and for image link paths, covering leading dots, reserved Windows names, empty segments, trailing dots and spaces, and control characters. Sidecar image and download paths now use the resolved title template instead of the raw `{pageTitle}` string. The popup cleans its editable title the same way.
+- **Download Fallbacks**: When the Downloads API refuses a Markdown file, it is saved through the page with a data: link on the Chrome blob path, the Firefox direct path, and the Firefox offscreen hand-off. Temporary blobs and tracking entries are released, a cancelled Save As saves nothing, and blob-URL downloads get their filename suggestion again.
+- **Firefox Build**: The Firefox background script list is now generated from the service worker's `importScripts()` list, restoring six missing modules. Firefox tab-strip context-menu IDs are routed by the dispatcher.
+- **Conversion Pipeline**: Shared `buildCodeFence()` picks a fence longer than any fence inside the code. Tables escape pipes, keep multi-line cells on one row, place rowspan cells correctly, pad rows to the delimiter width, and read every tbody and tfoot. MathML-to-TeX separates control words, escapes `# $ % &`, translates `mfenced` delimiters, and fixes `mtext` backslashes. Relative URLs resolve with `new URL(href, baseURI)`.
+- **Failure Handling**: Offscreen conversion errors reach the popup. All-tabs commands skip restricted tabs and handle each tab independently, and the two copy commands share one function. Reader sessions use a common storage prefix, keep the 25 most recent, and evict the oldest when session storage is full. Notification links dismiss their card, and unseen cards are shown first.
+- **Options, Webhooks, and Menus**: Options autosave on input with per-field timers and flush pending saves on pagehide. Webhook URLs URL-encode substituted page values and no longer follow redirects. Context menus await `removeAll()` before rebuilding, and a storage failure no longer mutates the shared default options.
+- **Cleanup and Coverage**: Removed about 70 lines of unused code from the content script plus other dead variables and the `replaceAll` polyfill, and added a shared debug-logging module. Added service-worker failure-path, ZIP bundle, real offscreen pipeline, notification ordering, and e2e coverage for popup errors, highlighted links, and Reader View highlights. Refreshed store screenshots and README gallery.
+
 ## 5.2.0
 
 ### User Highlights
